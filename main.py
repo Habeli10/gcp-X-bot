@@ -1,0 +1,124 @@
+import os
+import io
+import logging
+import tempfile
+import datetime
+import requests
+import functions_framework
+import tweepy
+import google.auth
+from googleapiclient.discovery import build
+from googleapiclient.http import MediaIoBaseDownload
+from google.cloud import secretmanager
+from tweepy.errors import TooManyRequests
+from datetime import timezone, timedelta
+
+# スプレッドシート情報
+SPREADSHEET_ID = '1jjjQBF2saPnND6yX2-YT7vMih8Dsy4ZCRp3rDRHDMZE'
+SHEET_NAME = 'シート1'
+JST = timezone(timedelta(hours=9))
+
+# Secret Manager からキー取得
+def get_secret(secret_id):
+    client = secretmanager.SecretManagerServiceClient()
+    project_id = os.environ['GCP_PROJECT']
+    name = f"projects/{project_id}/secrets/{secret_id}/versions/latest"
+    response = client.access_secret_version(name=name)
+    return response.payload.data.decode("UTF-8")
+
+# 認証付きでDriveから画像取得（ファイルIDを使う）
+def get_image_from_drive(file_id):
+    creds, _ = google.auth.default()
+    drive_service = build('drive', 'v3', credentials=creds)
+    request = drive_service.files().get_media(fileId=file_id)
+    fh = io.BytesIO()
+    downloader = MediaIoBaseDownload(fh, request)
+    done = False
+    while not done:
+        status, done = downloader.next_chunk()
+    fh.seek(0)
+    return fh.read()
+
+@functions_framework.http
+def tweet_from_sheet(request):
+    logging.info("✅ Cloud Function 呼び出し開始")
+
+    try:
+        # Twitter認証
+        auth = tweepy.OAuth1UserHandler(
+            get_secret("twitter_consumer_key"),
+            get_secret("twitter_consumer_secret"),
+            get_secret("twitter_access_token"),
+            get_secret("twitter_access_token_secret")
+        )
+        api = tweepy.API(auth)
+
+        client = tweepy.Client(
+            consumer_key=get_secret("twitter_consumer_key"),
+            consumer_secret=get_secret("twitter_consumer_secret"),
+            access_token=get_secret("twitter_access_token"),
+            access_token_secret=get_secret("twitter_access_token_secret")
+        )
+
+        # Sheets API
+        creds, _ = google.auth.default()
+        service = build('sheets', 'v4', credentials=creds)
+        sheet = service.spreadsheets()
+
+        result = sheet.values().get(
+            spreadsheetId=SPREADSHEET_ID,
+            range=f"{SHEET_NAME}!A2:F"
+        ).execute()
+        values = result.get('values', [])
+
+        for i, row in enumerate(values, start=2):
+            if len(row) < 6 or row[5] == '':
+                tweet_text = row[0]
+                image_urls = row[1:5]
+
+                media_ids = []
+                for url in image_urls:
+                    if not url.strip():
+                        continue
+                    try:
+                        file_id = url.split('/d/')[1].split('/')[0]
+                        image_bytes = get_image_from_drive(file_id)
+                        with tempfile.NamedTemporaryFile(delete=False, suffix=".png") as tmp:
+                            tmp.write(image_bytes)
+                            tmp.flush()
+                            media = api.media_upload(tmp.name)
+                            media_ids.append(media.media_id)
+                            os.unlink(tmp.name)
+                    except Exception as e:
+                        logging.warning(f"画像取得失敗: {url} → {e}")
+
+                try:
+                    if media_ids:
+                        client.create_tweet(text=tweet_text, media_ids=media_ids)
+                    else:
+                        client.create_tweet(text=tweet_text)
+                    result_status = "SUCCESS"
+                    logging.info(f"✅ 投稿成功: {tweet_text}")
+                except TooManyRequests:
+                    logging.warning("❌ 投稿失敗（429 Too Many Requests）")
+                    result_status = "RATE_LIMIT"
+                except Exception as e:
+                    logging.exception(f"❌ 投稿失敗: {e}")
+                    result_status = "FAILED"
+
+                # F列に記録（JST）
+                now = datetime.datetime.now(JST).strftime("%Y/%m/%d %H:%M:%S")
+                sheet.values().update(
+                    spreadsheetId=SPREADSHEET_ID,
+                    range=f"{SHEET_NAME}!F{i}",
+                    valueInputOption="RAW",
+                    body={"values": [[f"{now} ({result_status})"]]}
+                ).execute()
+
+                return f"Tweet result: {result_status}", 200
+
+        return "No untweeted row found.", 200
+
+    except Exception as e:
+        logging.exception(f"❌ 関数実行中にエラー: {e}")
+        return "Internal Error", 500
