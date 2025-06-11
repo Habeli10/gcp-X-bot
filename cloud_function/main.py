@@ -13,7 +13,6 @@ from google.cloud import secretmanager
 from tweepy.errors import TooManyRequests
 from datetime import timezone, timedelta
 
-SPREADSHEET_ID = get_secret("spreadsheet_id")
 SHEET_NAME = 'シート1'
 JST = timezone(timedelta(hours=9))
 
@@ -40,6 +39,8 @@ def get_image_from_drive(file_id):
 def tweet_from_sheet(request):
     logging.info("✅ Cloud Function 呼び出し開始")
     try:
+        SPREADSHEET_ID = get_secret("spreadsheet_id")
+
         auth = tweepy.OAuth1UserHandler(
             get_secret("twitter_consumer_key"),
             get_secret("twitter_consumer_secret"),
@@ -57,15 +58,29 @@ def tweet_from_sheet(request):
         creds, _ = google.auth.default()
         service = build('sheets', 'v4', credentials=creds)
         sheet = service.spreadsheets()
-        result = sheet.values().get(spreadsheetId=SPREADSHEET_ID, range=f"{SHEET_NAME}!A2:F").execute()
+        result = sheet.values().get(spreadsheetId=SPREADSHEET_ID, range=f"{SHEET_NAME}!A2:H").execute()
         values = result.get('values', [])
 
+        now_jst = datetime.datetime.now(JST)
+        posted_any = False
+
         for i, row in enumerate(values, start=2):
-            if len(row) < 6 or row[5] == '':
+            if len(row) < 6 or row[5].strip() == '':
                 tweet_text = row[0]
                 image_urls = row[1:5]
-                media_ids = []
+                scheduled_time_str = row[5].strip()
 
+                try:
+                    target_time = datetime.datetime.strptime(scheduled_time_str, "%Y/%m/%d %H:%M")
+                    target_time = JST.localize(target_time)
+                except Exception as e:
+                    logging.warning(f"⏰ 投稿予定時刻の解析に失敗（行{i}）: {e}")
+                    continue
+
+                if now_jst < target_time:
+                    continue  # まだ投稿予定時刻に達していない
+
+                media_ids = []
                 for url in image_urls:
                     if not url.strip():
                         continue
@@ -95,17 +110,17 @@ def tweet_from_sheet(request):
                     logging.exception(f"❌ 投稿失敗: {e}")
                     result_status = "FAILED"
 
-                now = datetime.datetime.now(JST).strftime("%Y/%m/%d %H:%M:%S")
+                timestamp = now_jst.strftime("%Y/%m/%d %H:%M:%S")
                 sheet.values().update(
                     spreadsheetId=SPREADSHEET_ID,
-                    range=f"{SHEET_NAME}!F{i}",
+                    range=f"{SHEET_NAME}!G{i}",
                     valueInputOption="RAW",
-                    body={"values": [[f"{now} ({result_status})"]]}
+                    body={"values": [[f"{timestamp} ({result_status})"]]}
                 ).execute()
 
-                return f"Tweet result: {result_status}", 200
+                posted_any = True
 
-        return "No untweeted row found.", 200
+        return ("✅ 投稿完了" if posted_any else "ℹ️ 投稿対象なし"), 200
 
     except Exception as e:
         logging.exception(f"❌ 関数実行中にエラー: {e}")
