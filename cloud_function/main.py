@@ -13,7 +13,7 @@ from google.cloud import secretmanager
 from tweepy.errors import TooManyRequests
 from datetime import timezone, timedelta
 
-SPREADSHEET_ID = '1jjjQBF2saPnND6yX2-YT7vMih8Dsy4ZCRp3rDRHDMZE'
+SPREADSHEET_ID = get_secret("spreadsheet_id")
 SHEET_NAME = 'シート1'
 JST = timezone(timedelta(hours=9))
 
