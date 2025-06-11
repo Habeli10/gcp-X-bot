@@ -66,59 +66,67 @@ def tweet_from_sheet(request):
 
         for i, row in enumerate(values, start=2):
             if len(row) < 6 or row[5].strip() == '':
-                tweet_text = row[0]
-                image_urls = row[1:5]
-                scheduled_time_str = row[5].strip()
+                continue
 
+            tweet_text = row[0]
+            image_urls = row[1:5]
+            scheduled_time_str = row[5].strip()
+
+            try:
                 try:
                     target_time = datetime.datetime.strptime(scheduled_time_str, "%Y/%m/%d %H:%M")
-                    target_time = JST.localize(target_time)
-                except Exception as e:
-                    logging.warning(f"⏰ 投稿予定時刻の解析に失敗（行{i}）: {e}")
+                except ValueError:
+                    target_time = datetime.datetime.strptime(scheduled_time_str, "%Y/%m/%d %H:%M:%S")
+                target_time = JST.localize(target_time)
+            except Exception as e:
+                logging.warning(f"⏰ 投稿予定時刻の解析に失敗（行{i}）: {e}")
+                continue
+
+            if now_jst < target_time:
+                continue
+
+            if len(row) >= 7 and row[6].strip() != "":
+                continue  # すでに投稿済み
+
+            media_ids = []
+            for url in image_urls:
+                if not url.strip():
                     continue
-
-                if now_jst < target_time:
-                    continue  # まだ投稿予定時刻に達していない
-
-                media_ids = []
-                for url in image_urls:
-                    if not url.strip():
-                        continue
-                    try:
-                        file_id = url.split('/d/')[1].split('/')[0]
-                        image_bytes = get_image_from_drive(file_id)
-                        with tempfile.NamedTemporaryFile(delete=False, suffix=".png") as tmp:
-                            tmp.write(image_bytes)
-                            tmp.flush()
-                            media = api.media_upload(tmp.name)
-                            media_ids.append(media.media_id)
-                            os.unlink(tmp.name)
-                    except Exception as e:
-                        logging.warning(f"画像取得失敗: {url} → {e}")
-
                 try:
-                    if media_ids:
-                        client.create_tweet(text=tweet_text, media_ids=media_ids)
-                    else:
-                        client.create_tweet(text=tweet_text)
-                    result_status = "SUCCESS"
-                    logging.info(f"✅ 投稿成功: {tweet_text}")
-                except TooManyRequests:
-                    logging.warning("❌ 投稿失敗（429 Too Many Requests）")
-                    result_status = "RATE_LIMIT"
+                    file_id = url.split('/d/')[1].split('/')[0]
+                    image_bytes = get_image_from_drive(file_id)
+                    with tempfile.NamedTemporaryFile(delete=False, suffix=".png") as tmp:
+                        tmp.write(image_bytes)
+                        tmp.flush()
+                        media = api.media_upload(tmp.name)
+                        media_ids.append(media.media_id)
+                        os.unlink(tmp.name)
                 except Exception as e:
-                    logging.exception(f"❌ 投稿失敗: {e}")
-                    result_status = "FAILED"
+                    logging.warning(f"画像取得失敗: {url} → {e}")
 
-                timestamp = now_jst.strftime("%Y/%m/%d %H:%M:%S")
-                sheet.values().update(
-                    spreadsheetId=SPREADSHEET_ID,
-                    range=f"{SHEET_NAME}!G{i}",
-                    valueInputOption="RAW",
-                    body={"values": [[f"{timestamp} ({result_status})"]]}
-                ).execute()
+            try:
+                if media_ids:
+                    client.create_tweet(text=tweet_text, media_ids=media_ids)
+                else:
+                    client.create_tweet(text=tweet_text)
+                result_status = "SUCCESS"
+                logging.info(f"✅ 投稿成功: {tweet_text}")
+            except TooManyRequests:
+                logging.warning("❌ 投稿失敗（429 Too Many Requests）")
+                result_status = "RATE_LIMIT"
+            except Exception as e:
+                logging.exception(f"❌ 投稿失敗: {e}")
+                result_status = "FAILED"
 
-                posted_any = True
+            timestamp = now_jst.strftime("%Y/%m/%d %H:%M:%S")
+            sheet.values().update(
+                spreadsheetId=SPREADSHEET_ID,
+                range=f"{SHEET_NAME}!G{i}",
+                valueInputOption="RAW",
+                body={"values": [[f"{timestamp} ({result_status})"]]}
+            ).execute()
+
+            posted_any = True
 
         return ("✅ 投稿完了" if posted_any else "ℹ️ 投稿対象なし"), 200
 
