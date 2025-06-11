@@ -53,5 +53,5 @@ gcloud scheduler jobs create http tweet-scheduler \
 echo ""
 echo "✅ デプロイ完了！Cloud Function URL: $URL"
 echo ""
-echo "📸 このメールアドレスを Google Drive画像およびスプレッドシートに「閲覧者」として共有してください:"
+echo "📸 このメールアドレスを画像には"閲覧者"、スプレッドシートには"編集者"として共有してください:"
 echo "   $SERVICE_ACCOUNT"
