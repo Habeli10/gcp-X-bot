@@ -4,8 +4,8 @@ import subprocess
 import sys
 
 secrets = {
-    "twitter_consumer_key": "TwitterのConsumer Key",
-    "twitter_consumer_secret": "TwitterのConsumer Secret",
+    "twitter_consumer_key": "TwitterのConsumer Key(API Key)",
+    "twitter_consumer_secret": "TwitterのConsumer Secret(API Key Secret)",
     "twitter_access_token": "TwitterのAccess Token",
     "twitter_access_token_secret": "TwitterのAccess Token Secret",
     "spreadsheet_id": "スプレッドシートのID (URLの /d/XXX/ の部分)"
