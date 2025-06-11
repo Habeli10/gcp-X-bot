@@ -1,5 +1,5 @@
 #!/bin/bash
-# deploy.sh - Cloud FunctionとSchedulerのデプロイ（Gen2対応＋リージョン指定）
+# deploy.sh - Cloud FunctionとSchedulerのデプロイ（Gen2＋Secret権限＋Drive共有案内）
 
 set -e
 
@@ -23,7 +23,17 @@ gcloud functions deploy "$FUNCTION_NAME" \
   --timeout=60s \
   --quiet
 
-# ✅ 正しいURLを1本だけ取得（Gen2対応）
+SERVICE_ACCOUNT=$(gcloud functions describe "$FUNCTION_NAME" \
+  --region="$REGION" \
+  --format="value(serviceConfig.serviceAccountEmail)")
+
+echo ""
+echo "🔐 Secret Manager 読み取り権限を付与中: $SERVICE_ACCOUNT"
+
+gcloud projects add-iam-policy-binding "$PROJECT_ID" \
+  --member="serviceAccount:$SERVICE_ACCOUNT" \
+  --role="roles/secretmanager.secretAccessor"
+
 URL=$(gcloud functions describe "$FUNCTION_NAME" \
   --region="$REGION" \
   --format="value(serviceConfig.uri)")
@@ -42,3 +52,6 @@ gcloud scheduler jobs create http tweet-scheduler \
 
 echo ""
 echo "✅ デプロイ完了！Cloud Function URL: $URL"
+echo ""
+echo "📸 このメールアドレスを Google Drive画像およびスプレッドシートに「閲覧者」として共有してください:"
+echo "   $SERVICE_ACCOUNT"
