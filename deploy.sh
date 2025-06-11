@@ -1,5 +1,5 @@
 #!/bin/bash
-# deploy.sh - Cloud FunctionとSchedulerのデプロイ（Gen2対応）
+# deploy.sh - Cloud FunctionとSchedulerのデプロイ（Gen2対応＋リージョン指定）
 
 set -e
 
@@ -23,7 +23,7 @@ gcloud functions deploy "$FUNCTION_NAME" \
   --timeout=60s \
   --quiet
 
-# ✅ URL取得（Gen2対応）
+# ✅ 正しいURLを1本だけ取得（Gen2対応）
 URL=$(gcloud functions describe "$FUNCTION_NAME" \
   --region="$REGION" \
   --format="value(serviceConfig.uri)")
@@ -36,6 +36,7 @@ gcloud scheduler jobs create http tweet-scheduler \
   --uri="$URL" \
   --http-method=GET \
   --time-zone=Asia/Tokyo \
+  --location="$REGION" \
   --project="$PROJECT_ID" \
   || echo "既にSchedulerが存在する可能性があります（OK）"
 
