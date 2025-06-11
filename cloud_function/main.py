@@ -77,7 +77,7 @@ def tweet_from_sheet(request):
                     target_time = datetime.datetime.strptime(scheduled_time_str, "%Y/%m/%d %H:%M")
                 except ValueError:
                     target_time = datetime.datetime.strptime(scheduled_time_str, "%Y/%m/%d %H:%M:%S")
-                target_time = JST.localize(target_time)
+                target_time = target_time.replace(tzinfo=JST)
             except Exception as e:
                 logging.warning(f"⏰ 投稿予定時刻の解析に失敗（行{i}）: {e}")
                 continue
